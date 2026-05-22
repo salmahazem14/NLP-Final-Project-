@@ -1,0 +1,12 @@
+groq
+numpy
+pandas
+joblib
+datasets
+scikit-learn
+torch
+transformers
+tqdm
+accelerate
+sentencepiece
+protobuf

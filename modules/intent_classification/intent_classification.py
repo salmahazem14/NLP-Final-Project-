@@ -1,5 +1,5 @@
 from groq import Groq
-
+import os
 
 VALID_LABELS = {
     "greeting",
@@ -10,8 +10,7 @@ VALID_LABELS = {
 }
 
 
-client = Groq(api_key="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")
-
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def build_prompt(user_input):
     return f"""

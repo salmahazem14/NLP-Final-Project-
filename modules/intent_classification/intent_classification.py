@@ -1,5 +1,7 @@
+from dotenv import load_dotenv
 from groq import Groq
 import os
+load_dotenv()
 
 VALID_LABELS = {
     "greeting",
@@ -14,47 +16,66 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def build_prompt(user_input):
     return f"""
-You are an intent classification system.
+You are a strict intent classifier.
 
-Classify the user input into ONE of the following labels:
+Labels:
 - greeting
 - goodbye
 - gratitude
 - asking_mental_health_question
 - out_of_scope
 
-Rules:
-- Output ONLY ONE label
-- Only return the label.
-- Do not explain.
-- Be strict.
-- Do NOT add punctuation
-- Do NOT add extra text
-- If message is about coding/programming → out_of_scope
-- If message is about math → out_of_scope
-- If message is about general knowledge → out_of_scope
-- If message contains goodbye → ALWAYS output goodbye unless it is mental health or feelings related putput mental health intent
-- If the message contains i guess or i think or maybe and a feeling or emotion → mental health intent
-- Mental health intent ONLY if user is asking about feelings, emotions, anxiety, depression, stress
+Definitions:
 
-If multiple intents exist, choose the MOST IMPORTANT one:
-Priority: asking_mental_health_question > goodbye > greeting > gratitude > out_of_scope
-
+greeting:
+Simple greetings only.
 Examples:
-Input: "Hello there"
-Output: greeting
+- hi
+- hello
+- hey
 
-Input: "Thanks for your help"
-Output: gratitude
+goodbye:
+Ending conversation.
+Examples:
+- bye
+- goodbye
+- see you
 
-Input: "I feel anxious all the time"
-Output: asking_mental_health_question
+gratitude:
+Expressing thanks only.
+Examples:
+- thanks
+- thank you
 
-Input: "What is 2+2?"
-Output: out_of_scope
+asking_mental_health_question:
+User expresses emotional distress, mental suffering,
+or asks for emotional/mental help.
+Examples:
+- I feel depressed
+- I am anxious
+- I feel hopeless
+- I want to die
+- can you help with stress?
 
-Now classify:
+out_of_scope:
+Everything else:
+- coding
+- math
+- factual questions
+- neutral statements
+- sarcasm without explicit distress
+
+Rules:
+- Return ONE label only
+- No punctuation
+- No explanations
+- If explicit emotional distress exists, choose asking_mental_health_question
+- If goodbye exists with emotional distress, choose asking_mental_health_question
+- Be conservative about mental health classification
+- Do not infer hidden emotions unless clearly stated
+
 Input: "{user_input}"
+
 Output:
 """
 

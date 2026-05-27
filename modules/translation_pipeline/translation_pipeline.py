@@ -11,35 +11,32 @@ def translate(text, source_language, target_language):
     """
     Translate text from source language to target language using Groq LLM.
     
-    Only called when source_language != target_language (handled by caller).
-    
     Args:
         text (str): The text to translate
-        source_language (str): The source language code (e.g., 'ar', 'fr', 'es', 'en')
-        target_language (str): The target language code (e.g., 'ar', 'fr', 'es', 'en')
+        source_language (str): Source language code (e.g., 'ar', 'en')
+        target_language (str): Target language code (e.g., 'ar', 'en')
     
     Returns:
-        str: Translated text
-    
-    Example:
-        >>> translate("أنا قلق", "ar", "en")
-        "I am anxious"
+        str: Translated text, or original text if translation fails
     """
-    # If same language, return as-is
     if source_language.lower() == target_language.lower():
         return text
     
-    prompt = f"""Translate from {source_language} to {target_language}.
+    prompt = f"""Translate the following text from {source_language} to {target_language}.
 Only provide the translation, no explanations.
 
-Text: "{text}"
+Text: {text}
 
 Translation:"""
     
-    response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        return response.choices[0].message.content.strip().strip('"').strip("'")
     
-    return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[Translation Error]: {e}")
+        return text  

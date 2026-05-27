@@ -33,6 +33,31 @@ A smart chatbot that understands what you're feeling and helps you with mental h
 - Uses smart embeddings to find the most relevant information
 - Powered by AI to give you natural, helpful responses
 
+**5. Translation Pipeline** (For Multilingual Support)
+- Translates non-English user input to English for processing
+- Translates RAG responses back to the user
+
+## How the Pipeline Works
+
+```
+User Input (any language)
+    ↓
+Language Detector (identifies language)
+    ↓
+If language ≠ English:
+  Translation Pipeline → English
+    ↓
+Intent Classifier (works on English)
+Emotion Classifier (works on English)
+    ↓
+RAG Pipeline (searches in English, responds in English)
+    ↓
+If user's language ≠ English:
+  Translation Pipeline → User's Language
+    ↓
+User Response (in original language)
+```
+
 ## Getting Started
 
 ### Requirements
@@ -58,9 +83,29 @@ python app.py
 
 Then open your browser and go to `http://localhost:5000`
 
+### Using the Translation Pipeline
 
+The translation module handles converting between languages. It's called automatically when needed:
 
+```python
+from translation_pipeline import translate
 
+# Translate Arabic to English
+english_text = translate("أنا قلق", "ar", "en")
+# Returns: "I am anxious"
+
+# Translate English to French
+french_text = translate("I feel stressed", "en", "fr")
+# Returns: "Je me sens stressé"
+```
+
+In the full pipeline, the system:
+1. Detects user's language using the language detector
+2. If not English, translates input to English
+3. Processes in English (intent, emotion, RAG)
+4. If user's language wasn't English, translates response back
+
+**Note**: Only non-English users trigger translation API calls.
 
 ## Technologies Used
 

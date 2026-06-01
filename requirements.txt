@@ -11,3 +11,14 @@ accelerate
 sentencepiece
 protobuf
 dotenv
+langchain
+langchain-community
+langchain-qdrant
+langchain-huggingface
+langchain-groq
+qdrant-client
+sentence-transformers
+fastapi
+uvicorn
+pydantic-settings
+python-dotenv

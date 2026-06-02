@@ -1,8 +1,11 @@
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from src.chain import build_chain
 from src.history import delete_session_history
 import uuid
+
 
 app   = FastAPI(title="Mental Health RAG API")
 chain = build_chain()
@@ -24,7 +27,6 @@ def health():
 def chat(request: QueryRequest):
     try:
         session_id = request.session_id or str(uuid.uuid4())
-        print("here")
         answer = chain.invoke(
             {"question": request.question},
             config={
@@ -34,7 +36,6 @@ def chat(request: QueryRequest):
                 }
             },
         )
-        print(answer)
         return QueryResponse(answer=answer, session_id=session_id)
     except Exception as e:
         print(f"here *** {e}")

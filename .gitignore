@@ -63,7 +63,7 @@ Thumbs.db
 models/**/*.pkl
 models/**/*.h5
 models/**/*.pth
-
+models
 # Data files
 data/
 *.csv

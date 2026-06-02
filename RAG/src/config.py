@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     top_k: int = 4
     final_llm:str = "llama-3.3-70b-versatile"
     hf_token: str = ""
+    lang_model_path: str = "../models/language_classifier_multi.pkl"
+    emotion_model_dir: str = "../models/emotion_classifier"
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -10,7 +10,11 @@ const apiUrlInput = document.getElementById("api-url");
 const apiEndpointInput = document.getElementById("api-endpoint");
 
 const STORAGE_KEY = "serenity_settings";
-const defaults = { apiUrl: "https://surprising-beauty-production-34f3.up.railway.app", endpoint: "/chat" };
+const SESSION_KEY = "serenity_session";
+const defaults = { 
+  apiUrl: "http://localhost:8000", 
+  endpoint: "/chat" 
+};
 
 function loadSettings() {
   try {
@@ -22,6 +26,15 @@ function loadSettings() {
 
 function saveSettings(s) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+}
+
+function getSessionId() {
+  let sessionId = localStorage.getItem(SESSION_KEY);
+  if (!sessionId) {
+    sessionId = "session_" + Date.now();
+    localStorage.setItem(SESSION_KEY, sessionId);
+  }
+  return sessionId;
 }
 
 let settings = loadSettings();
@@ -217,10 +230,16 @@ async function send() {
 
   try {
     const url = settings.apiUrl + settings.endpoint;
+    const sessionId = getSessionId();
+    
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ 
+        question: text,
+        session_id: sessionId,
+        k: 4
+      }),
     });
 
     hideTyping();
@@ -239,15 +258,16 @@ async function send() {
 
     const data = await res.json();
 
-    const reply =
-      data.response || data.answer || data.message || data.reply || data.text;
+    const reply = data.answer || data.response || data.message || data.reply || data.text;
+    const metadata = data.detected_language ? 
+      `\n\n*[${data.emotion} • ${data.intent}]*` : '';
 
-    addBotMessage(reply || JSON.stringify(data, null, 2), text);
+    addBotMessage((reply || JSON.stringify(data, null, 2)) + metadata, text);
   } catch (err) {
     hideTyping();
     if (err.name === "TypeError" && err.message === "Failed to fetch") {
       addError(
-        `Could not connect to ${settings.apiUrl}. Make sure your backend is running and CORS is enabled.`
+        `Could not connect to ${settings.apiUrl}. Make sure your backend is running at ${settings.apiUrl} and CORS is enabled.`
       );
     } else {
       addError(err.message);

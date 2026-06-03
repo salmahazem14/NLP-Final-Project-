@@ -1,25 +1,15 @@
-"""Emotion Classification Module using Transformer Architecture.
+"""
+Emotion Classification Module
+Fine-tuned DistilBERT for 6-class emotion detection in mental health chatbot contexts.
 
-This module provides a production-ready emotion classifier fine-tuned on DistilBERT.
-Designed specifically for mental health chatbot applications where understanding 
-user emotional state is critical for generating appropriate, empathetic responses.
-
-Key Features:
-- Fine-tuned DistilBERT for 6-class emotion detection
-- Confidence scoring for uncertainty detection
-- Class imbalance handling with weighted loss
-- Early stopping and learning rate scheduling
-- Batch prediction for efficiency
-- Model versioning and metadata tracking
-- Comprehensive error handling and validation
-
-Author: 
+Author:
 Date: May 2026
-Project: RAG-Based Mental Health Support Chatbot - Emotion Detection Module
 """
 
+import json
 import logging
 import warnings
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -42,24 +32,25 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-# Suppress unnecessary warnings in production
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EmotionDataset(Dataset):
-    """PyTorch Dataset wrapper for emotion classification data."""
+    """Wraps tokenized text and integer labels for use with PyTorch DataLoader."""
 
-    def __init__(self, texts: List[str], labels: List[int], tokenizer, max_length: int = 128):
-        """
-        Args:
-            texts: List of input text strings
-            labels: List of integer emotion labels
-            tokenizer: HuggingFace tokenizer instance
-            max_length: Maximum sequence length for tokenization
-        """
+    def __init__(
+        self,
+        texts: List[str],
+        labels: List[int],
+        tokenizer,
+        max_length: int = 128,
+    ):
         self.texts = texts
         self.labels = labels
         self.tokenizer = tokenizer
@@ -69,36 +60,31 @@ class EmotionDataset(Dataset):
         return len(self.texts)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Returns tokenized text and label as tensors."""
-        text = str(self.texts[idx])
-        label = self.labels[idx]
-
-        # Tokenize with proper padding and truncation
         encoding = self.tokenizer(
-            text,
+            str(self.texts[idx]),
             max_length=self.max_length,
             padding="max_length",
             truncation=True,
             return_tensors="pt",
         )
-
         return {
             "input_ids": encoding["input_ids"].flatten(),
             "attention_mask": encoding["attention_mask"].flatten(),
-            "label": torch.tensor(label, dtype=torch.long),
+            "label": torch.tensor(self.labels[idx], dtype=torch.long),
         }
 
 
 class EmotionClassifier:
     """
-    Production-ready emotion classifier using fine-tuned DistilBERT.
-    
-    Handles the complete ML lifecycle: data preparation, training with early stopping,
-    evaluation with comprehensive metrics, model persistence, and inference with
-    confidence scores.
+    Fine-tunes DistilBERT for 6-class emotion detection.
+
+    Covers the full lifecycle: data loading, training with early stopping,
+    evaluation, single and batch inference, and model persistence.
+
+    Emotion labels follow the dair-ai/emotion dataset convention:
+        0: sadness  1: joy  2: love  3: anger  4: fear  5: surprise
     """
 
-    # Emotion label mapping from the dair-ai/emotion dataset
     EMOTION_LABELS = {
         0: "sadness",
         1: "joy",
@@ -115,130 +101,105 @@ class EmotionClassifier:
         device: Optional[str] = None,
     ):
         """
-        Initialize the emotion classifier with a pre-trained transformer model.
-
         Args:
-            model_name: HuggingFace model identifier (default: DistilBERT)
-            max_length: Maximum token sequence length
-            device: Target device ('cuda', 'cpu', or None for auto-detection)
+            model_name: Any HuggingFace sequence-classification compatible model.
+            max_length: Token sequence length. 128 covers ~95% of conversational text.
+            device: 'cuda', 'cpu', or None to auto-detect.
         """
-        logging.info(f"Initializing EmotionClassifier with model: {model_name}")
-
-        # Auto-detect optimal device
-        if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = torch.device(device)
-
-        logging.info(f"Using device: {self.device}")
-
         self.model_name = model_name
         self.max_length = max_length
-        self.tokenizer = None
-        self.model = None
-        self.training_history = {"train_loss": [], "val_loss": [], "val_f1": []}
+        self.device = torch.device(
+            device if device else ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.model: Optional[AutoModelForSequenceClassification] = None
+        self.training_history: Dict[str, List[float]] = {
+            "train_loss": [],
+            "val_loss": [],
+            "val_f1": [],
+        }
 
-        # Initialize tokenizer
+        logger.info(f"Loading tokenizer '{model_name}' on {self.device}")
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            logging.info("Tokenizer loaded successfully")
-        except Exception as e:
-            logging.error(f"Failed to load tokenizer: {e}")
-            raise RuntimeError(f"Tokenizer initialization failed: {e}") from e
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load tokenizer for '{model_name}'") from exc
+
+    # ------------------------------------------------------------------
+    # Data
+    # ------------------------------------------------------------------
 
     def prepare_data(
         self,
         dataset_name: str = "dair-ai/emotion",
         batch_size: int = 32,
-        test_size: float = 0.1,
         num_workers: int = 0,
     ) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """
-        Load and prepare the emotion dataset with proper batching.
+        Loads the dair-ai/emotion dataset and returns DataLoaders for each split.
+
+        The dataset ships with its own train/validation/test splits, so no
+        manual splitting is needed here.
 
         Args:
-            dataset_name: HuggingFace dataset identifier
-            batch_size: Training batch size
-            test_size: Fraction of train data to use for validation
-            num_workers: DataLoader workers (0 for containers, 2-4 for local GPU)
+            dataset_name: HuggingFace dataset identifier.
+            batch_size: Samples per batch. Reduce to 16 if you hit CUDA OOM.
+            num_workers: Worker processes for data loading. Keep at 0 inside
+                         Docker containers or Jupyter notebooks to avoid forking
+                         issues; bump to 2-4 on a bare-metal GPU machine.
 
         Returns:
-            Tuple of (train_loader, val_loader, test_loader)
+            (train_loader, val_loader, test_loader)
         """
-        logging.info(f"Loading dataset: {dataset_name}")
-
+        logger.info(f"Loading dataset '{dataset_name}'")
         try:
             dataset = load_dataset(dataset_name)
-        except Exception as e:
-            logging.error(f"Dataset loading failed: {e}")
-            raise ValueError(f"Cannot load dataset '{dataset_name}': {e}") from e
+        except Exception as exc:
+            raise ValueError(f"Could not load dataset '{dataset_name}'") from exc
 
-        # Extract splits
-        train_data = dataset["train"]
-        test_data = dataset["test"]
-        val_data = dataset["validation"]
+        splits = {
+            name: EmotionDataset(
+                texts=dataset[name]["text"],
+                labels=dataset[name]["label"],
+                tokenizer=self.tokenizer,
+                max_length=self.max_length,
+            )
+            for name in ("train", "validation", "test")
+        }
 
-        logging.info(
-            f"Dataset sizes - Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}"
+        logger.info(
+            "Split sizes — train: %d, val: %d, test: %d",
+            len(splits["train"]),
+            len(splits["validation"]),
+            len(splits["test"]),
         )
 
-        # Create PyTorch datasets
-        train_dataset = EmotionDataset(
-            texts=train_data["text"],
-            labels=train_data["label"],
-            tokenizer=self.tokenizer,
-            max_length=self.max_length,
-        )
+        loader_kwargs = dict(batch_size=batch_size, num_workers=num_workers)
+        train_loader = DataLoader(splits["train"], shuffle=True, **loader_kwargs)
+        val_loader = DataLoader(splits["validation"], shuffle=False, **loader_kwargs)
+        test_loader = DataLoader(splits["test"], shuffle=False, **loader_kwargs)
 
-        val_dataset = EmotionDataset(
-            texts=val_data["text"],
-            labels=val_data["label"],
-            tokenizer=self.tokenizer,
-            max_length=self.max_length,
-        )
-
-        test_dataset = EmotionDataset(
-            texts=test_data["text"],
-            labels=test_data["label"],
-            tokenizer=self.tokenizer,
-            max_length=self.max_length,
-        )
-
-        # Create data loaders with proper shuffling
-        # Note: num_workers=0 avoids multiprocessing issues in containers/notebooks
-        # For local development with GPUs, you can increase to num_workers=2-4
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
-        )
-        val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
-        )
-
-        logging.info("Data loaders created successfully")
         return train_loader, val_loader, test_loader
 
-    def _calculate_class_weights(self, train_loader: DataLoader) -> torch.Tensor:
+    def _class_weights(self, train_loader: DataLoader) -> torch.Tensor:
         """
-        Calculate class weights to handle imbalanced emotion distribution.
-        Critical for mental health apps where some emotions may be underrepresented.
-        """
-        logging.info("Calculating class weights for imbalanced data handling...")
-        label_counts = torch.zeros(len(self.EMOTION_LABELS))
+        Computes inverse-frequency class weights from the training set.
 
+        Emotion datasets tend to be skewed toward sadness and joy, which can
+        cause the model to under-learn minority classes like surprise or love.
+        Weighted loss counteracts this without requiring oversampling.
+        """
+        counts = torch.zeros(len(self.EMOTION_LABELS))
         for batch in train_loader:
-            labels = batch["label"]
-            for label in labels:
-                label_counts[label] += 1
+            for label in batch["label"]:
+                counts[label] += 1
 
-        # Inverse frequency weighting
-        total_samples = label_counts.sum()
-        class_weights = total_samples / (len(self.EMOTION_LABELS) * label_counts)
+        weights = counts.sum() / (len(self.EMOTION_LABELS) * counts)
+        logger.info("Class weights: %s", weights.tolist())
+        return weights.to(self.device)
 
-        logging.info(f"Class weights: {class_weights.tolist()}")
-        return class_weights.to(self.device)
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
 
     def train(
         self,
@@ -251,244 +212,226 @@ class EmotionClassifier:
         use_class_weights: bool = True,
     ) -> Dict[str, List[float]]:
         """
-        Fine-tune the transformer model with advanced training techniques.
+        Fine-tunes the model with AdamW, linear LR warmup, gradient clipping,
+        and early stopping.
 
         Args:
-            train_loader: Training data loader
-            val_loader: Validation data loader
-            epochs: Maximum training epochs
-            learning_rate: Peak learning rate for AdamW
-            warmup_steps: Linear warmup steps for learning rate
-            early_stopping_patience: Epochs to wait before stopping if no improvement
-            use_class_weights: Whether to apply class weighting for imbalance
+            train_loader: Training DataLoader.
+            val_loader: Validation DataLoader.
+            epochs: Maximum number of passes over the training data.
+            learning_rate: Peak LR for AdamW. 2e-5 is a safe default for
+                           DistilBERT fine-tuning; go lower (1e-5) if loss
+                           is unstable early on.
+            warmup_steps: Steps over which LR linearly ramps up. Helps avoid
+                          destroying pre-trained weights in the first batches.
+            early_stopping_patience: Stop after this many epochs with no
+                                     improvement in validation F1.
+            use_class_weights: Pass weighted loss to the criterion. Recommended
+                               unless your dataset is already balanced.
 
         Returns:
-            Training history dictionary with losses and metrics
+            Training history with per-epoch train loss, val loss, and val F1.
         """
-        logging.info("Initializing model for training...")
-
-        # Initialize model
+        logger.info("Initializing model '%s'", self.model_name)
         try:
             self.model = AutoModelForSequenceClassification.from_pretrained(
                 self.model_name, num_labels=len(self.EMOTION_LABELS)
-            )
-            self.model.to(self.device)
-        except Exception as e:
-            logging.error(f"Model initialization failed: {e}")
-            raise RuntimeError(f"Cannot initialize model: {e}") from e
+            ).to(self.device)
+        except Exception as exc:
+            raise RuntimeError(f"Could not load model '{self.model_name}'") from exc
 
-        # Calculate class weights if enabled
-        class_weights = None
-        if use_class_weights:
-            class_weights = self._calculate_class_weights(train_loader)
-            criterion = nn.CrossEntropyLoss(weight=class_weights)
-        else:
-            criterion = nn.CrossEntropyLoss()
-
-        # AdamW optimizer (better for transformers than standard Adam)
+        criterion = nn.CrossEntropyLoss(
+            weight=self._class_weights(train_loader) if use_class_weights else None
+        )
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
-
-        # Learning rate scheduler with warmup
-        total_steps = len(train_loader) * epochs
         scheduler = get_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+            optimizer,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=len(train_loader) * epochs,
         )
 
-        # Early stopping tracking
         best_val_f1 = 0.0
+        best_weights = None
         patience_counter = 0
-        best_model_state = None
 
-        logging.info(
-            f"Starting training: {epochs} epochs, {len(train_loader)} batches/epoch"
-        )
-
-        for epoch in range(epochs):
-            # ==================== TRAINING PHASE ====================
+        for epoch in range(1, epochs + 1):
             self.model.train()
-            train_loss = 0.0
-            train_progress = tqdm(
-                train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]"
-            )
+            epoch_loss = 0.0
 
-            for batch in train_progress:
-                # Move batch to device
+            progress = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}")
+            for batch in progress:
                 input_ids = batch["input_ids"].to(self.device)
                 attention_mask = batch["attention_mask"].to(self.device)
                 labels = batch["label"].to(self.device)
 
-                # Forward pass
                 optimizer.zero_grad()
-                outputs = self.model(
-                    input_ids=input_ids, attention_mask=attention_mask
-                )
-                loss = criterion(outputs.logits, labels)
-
-                # Backward pass
+                logits = self.model(input_ids=input_ids, attention_mask=attention_mask).logits
+                loss = criterion(logits, labels)
                 loss.backward()
+
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
                 scheduler.step()
 
-                train_loss += loss.item()
-                train_progress.set_postfix({"loss": loss.item()})
+                epoch_loss += loss.item()
+                progress.set_postfix(loss=f"{loss.item():.4f}")
 
-            avg_train_loss = train_loss / len(train_loader)
+            avg_train_loss = epoch_loss / len(train_loader)
+            val_loss, val_f1, _ = self._evaluate(val_loader, criterion)
+
             self.training_history["train_loss"].append(avg_train_loss)
-
-            # ==================== VALIDATION PHASE ====================
-            val_loss, val_f1, val_metrics = self._evaluate_model(
-                val_loader, criterion, split_name="Validation"
-            )
             self.training_history["val_loss"].append(val_loss)
             self.training_history["val_f1"].append(val_f1)
 
-            logging.info(
-                f"Epoch {epoch+1}/{epochs} - "
-                f"Train Loss: {avg_train_loss:.4f}, "
-                f"Val Loss: {val_loss:.4f}, "
-                f"Val F1: {val_f1:.4f}"
+            logger.info(
+                "Epoch %d/%d — train loss: %.4f  val loss: %.4f  val F1: %.4f",
+                epoch, epochs, avg_train_loss, val_loss, val_f1,
             )
 
-            # Early stopping check
             if val_f1 > best_val_f1:
                 best_val_f1 = val_f1
+                best_weights = deepcopy(self.model.state_dict())
                 patience_counter = 0
-                best_model_state = self.model.state_dict().copy()
-                logging.info(f"✓ New best validation F1: {best_val_f1:.4f}")
+                logger.info("New best val F1: %.4f — checkpoint saved", best_val_f1)
             else:
                 patience_counter += 1
-                logging.info(
-                    f"No improvement. Patience: {patience_counter}/{early_stopping_patience}"
+                logger.info(
+                    "No improvement (%d/%d)", patience_counter, early_stopping_patience
                 )
-
                 if patience_counter >= early_stopping_patience:
-                    logging.info("Early stopping triggered!")
+                    logger.info("Early stopping triggered at epoch %d", epoch)
                     break
 
-        # Restore best model
-        if best_model_state is not None:
-            self.model.load_state_dict(best_model_state)
-            logging.info("Restored best model from training")
+        if best_weights is not None:
+            self.model.load_state_dict(best_weights)
+            logger.info("Restored best checkpoint (val F1: %.4f)", best_val_f1)
 
         return self.training_history
 
-    def _evaluate_model(
-        self, data_loader: DataLoader, criterion: nn.Module, split_name: str = "Test"
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    def _evaluate(
+        self,
+        loader: DataLoader,
+        criterion: nn.Module,
     ) -> Tuple[float, float, Dict]:
         """
-        Internal evaluation method with comprehensive metrics.
-
-        Returns:
-            Tuple of (loss, f1_score, metrics_dict)
+        Runs a full pass over `loader` and returns loss, weighted F1, and a
+        metrics dict. Used internally by both train() and evaluate().
         """
         if self.model is None:
-            raise RuntimeError("Model not initialized. Train or load a model first.")
+            raise RuntimeError("No model loaded. Call train() or load_model() first.")
 
         self.model.eval()
         total_loss = 0.0
-        all_predictions = []
-        all_labels = []
+        all_preds, all_labels = [], []
 
         with torch.no_grad():
-            for batch in data_loader:
+            for batch in loader:
                 input_ids = batch["input_ids"].to(self.device)
                 attention_mask = batch["attention_mask"].to(self.device)
                 labels = batch["label"].to(self.device)
 
-                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-                loss = criterion(outputs.logits, labels)
-                total_loss += loss.item()
+                logits = self.model(
+                    input_ids=input_ids, attention_mask=attention_mask
+                ).logits
+                total_loss += criterion(logits, labels).item()
 
-                predictions = torch.argmax(outputs.logits, dim=1)
-                all_predictions.extend(predictions.cpu().numpy())
+                preds = torch.argmax(logits, dim=1)
+                all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
 
-        avg_loss = total_loss / len(data_loader)
-        f1 = f1_score(all_labels, all_predictions, average="weighted")
+        avg_loss = total_loss / len(loader)
+        weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
 
         metrics = {
             "loss": avg_loss,
-            "accuracy": accuracy_score(all_labels, all_predictions),
-            "f1_weighted": f1,
-            "predictions": all_predictions,
+            "accuracy": accuracy_score(all_labels, all_preds),
+            "f1_weighted": weighted_f1,
+            "predictions": all_preds,
             "labels": all_labels,
         }
-
-        return avg_loss, f1, metrics
+        return avg_loss, weighted_f1, metrics
 
     def evaluate(
-        self, test_loader: DataLoader, show_confusion_matrix: bool = True
+        self,
+        test_loader: DataLoader,
+        show_confusion_matrix: bool = True,
     ) -> Dict:
         """
-        Evaluate model performance with detailed metrics.
+        Prints a full classification report and optionally a confusion matrix.
+
+        Uses unweighted CrossEntropyLoss here so the reported loss reflects
+        raw model performance rather than the training objective.
 
         Args:
-            test_loader: Test data loader
-            show_confusion_matrix: Whether to compute and display confusion matrix
+            test_loader: Test DataLoader.
+            show_confusion_matrix: Print the confusion matrix after the report.
 
         Returns:
-            Dictionary containing all evaluation metrics
+            Metrics dict (loss, accuracy, f1_weighted, predictions, labels).
         """
-        logging.info("Evaluating model on test set...")
-
         if self.model is None:
-            raise RuntimeError("Model not trained or loaded. Cannot evaluate.")
+            raise RuntimeError("No model loaded. Call train() or load_model() first.")
 
-        criterion = nn.CrossEntropyLoss()
-        _, _, metrics = self._evaluate_model(test_loader, criterion, split_name="Test")
+        logger.info("Evaluating on test set...")
+        _, _, metrics = self._evaluate(test_loader, nn.CrossEntropyLoss())
 
-        # Print comprehensive report
-        print("\n" + "=" * 70)
-        print(f"{'TEST SET EVALUATION':^70}")
-        print("=" * 70)
-        print(f"Accuracy: {metrics['accuracy']:.4f}")
+        divider = "=" * 70
+        print(f"\n{divider}")
+        print(f"{'TEST SET RESULTS':^70}")
+        print(divider)
+        print(f"Accuracy:          {metrics['accuracy']:.4f}")
         print(f"Weighted F1-Score: {metrics['f1_weighted']:.4f}")
-        print("\nPer-Class Performance:")
+        print("\nPer-class breakdown:")
         print("-" * 70)
-
-        report = classification_report(
-            metrics["labels"],
-            metrics["predictions"],
-            target_names=list(self.EMOTION_LABELS.values()),
-            digits=4,
+        print(
+            classification_report(
+                metrics["labels"],
+                metrics["predictions"],
+                target_names=list(self.EMOTION_LABELS.values()),
+                digits=4,
+            )
         )
-        print(report)
 
         if show_confusion_matrix:
             cm = confusion_matrix(metrics["labels"], metrics["predictions"])
-            print("\nConfusion Matrix:")
+            print("Confusion matrix (rows = true, columns = predicted):")
             print("-" * 70)
-            print("Rows: True Labels | Columns: Predicted Labels")
             print(cm)
 
-        print("=" * 70 + "\n")
-
+        print(f"{divider}\n")
         return metrics
 
+    # ------------------------------------------------------------------
+    # Inference
+    # ------------------------------------------------------------------
+
     def predict(
-        self, text: str, return_confidence: bool = True
+        self,
+        text: str,
+        return_confidence: bool = True,
     ) -> Union[str, Dict[str, Union[str, float, Dict[str, float]]]]:
         """
-        Predict emotion for a single text input.
+        Predicts the emotion of a single text string.
 
         Args:
-            text: Input text string
-            return_confidence: If True, return confidence scores for all emotions
+            text: Raw input text.
+            return_confidence: If False, returns just the label string.
+                               If True, returns a dict with the predicted emotion,
+                               its confidence score, and probabilities for all classes.
 
         Returns:
-            If return_confidence=False: emotion label string
-            If return_confidence=True: dict with prediction, confidence, and all probabilities
+            str or dict depending on return_confidence.
         """
         if not isinstance(text, str) or not text.strip():
-            raise ValueError("Input must be a non-empty string")
-
+            raise ValueError("Input must be a non-empty string.")
         if self.model is None:
-            raise RuntimeError("Model not trained or loaded. Cannot predict.")
+            raise RuntimeError("No model loaded. Call train() or load_model() first.")
 
         self.model.eval()
-
-        # Tokenize input
         encoding = self.tokenizer(
             text,
             max_length=self.max_length,
@@ -496,178 +439,162 @@ class EmotionClassifier:
             truncation=True,
             return_tensors="pt",
         )
-
         input_ids = encoding["input_ids"].to(self.device)
         attention_mask = encoding["attention_mask"].to(self.device)
 
-        # Get prediction
         with torch.no_grad():
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-            logits = outputs.logits
-            probabilities = torch.softmax(logits, dim=1)
-            predicted_class = torch.argmax(probabilities, dim=1).item()
-            confidence = probabilities[0, predicted_class].item()
+            logits = self.model(input_ids=input_ids, attention_mask=attention_mask).logits
+            probs = torch.softmax(logits, dim=1)
+            pred_idx = torch.argmax(probs, dim=1).item()
 
-        emotion = self.EMOTION_LABELS[predicted_class]
+        emotion = self.EMOTION_LABELS[pred_idx]
 
         if not return_confidence:
             return emotion
 
-        # Return detailed prediction with all confidence scores
-        all_confidences = {
-            self.EMOTION_LABELS[i]: probabilities[0, i].item()
-            for i in range(len(self.EMOTION_LABELS))
-        }
-
         return {
             "emotion": emotion,
-            "confidence": confidence,
-            "all_probabilities": all_confidences,
+            "confidence": probs[0, pred_idx].item(),
+            "all_probabilities": {
+                self.EMOTION_LABELS[i]: probs[0, i].item()
+                for i in range(len(self.EMOTION_LABELS))
+            },
         }
 
     def predict_batch(
-        self, texts: List[str], return_confidence: bool = False
+        self,
+        texts: List[str],
+        return_confidence: bool = False,
+        batch_size: int = 32,
     ) -> List[Union[str, Dict]]:
         """
-        Efficient batch prediction for multiple texts.
-        Essential for processing chat history or multiple user inputs.
+        Runs inference over a list of strings in mini-batches.
+
+        Useful for scoring a chat history or a queue of incoming messages
+        without the overhead of one tokenization call per text.
 
         Args:
-            texts: List of input text strings
-            return_confidence: Whether to include confidence scores
+            texts: List of raw input strings.
+            return_confidence: Include confidence score per prediction.
+            batch_size: Internal mini-batch size. Reduce if memory is tight.
 
         Returns:
-            List of predictions (format depends on return_confidence)
+            List of emotion strings, or dicts if return_confidence=True.
         """
         if not texts or not isinstance(texts, list):
-            raise ValueError("Input must be a non-empty list of strings")
-
+            raise ValueError("Input must be a non-empty list of strings.")
         if self.model is None:
-            raise RuntimeError("Model not trained or loaded. Cannot predict.")
+            raise RuntimeError("No model loaded. Call train() or load_model() first.")
 
         self.model.eval()
         results = []
 
-        # Process in batches for efficiency
-        batch_size = 32
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i : i + batch_size]
-
-            # Tokenize batch
+        for start in range(0, len(texts), batch_size):
+            chunk = texts[start : start + batch_size]
             encodings = self.tokenizer(
-                batch_texts,
+                chunk,
                 max_length=self.max_length,
                 padding=True,
                 truncation=True,
                 return_tensors="pt",
             )
-
             input_ids = encodings["input_ids"].to(self.device)
             attention_mask = encodings["attention_mask"].to(self.device)
 
-            # Get predictions
             with torch.no_grad():
-                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-                logits = outputs.logits
-                probabilities = torch.softmax(logits, dim=1)
-                predicted_classes = torch.argmax(probabilities, dim=1)
+                logits = self.model(
+                    input_ids=input_ids, attention_mask=attention_mask
+                ).logits
+                probs = torch.softmax(logits, dim=1)
+                pred_indices = torch.argmax(probs, dim=1)
 
-                for j, pred_class in enumerate(predicted_classes):
-                    emotion = self.EMOTION_LABELS[pred_class.item()]
-                    conf = probabilities[j, pred_class].item()
-
-                    if return_confidence:
-                        results.append({"emotion": emotion, "confidence": conf})
-                    else:
-                        results.append(emotion)
+            for j, idx in enumerate(pred_indices):
+                emotion = self.EMOTION_LABELS[idx.item()]
+                if return_confidence:
+                    results.append({"emotion": emotion, "confidence": probs[j, idx].item()})
+                else:
+                    results.append(emotion)
 
         return results
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
     def save_model(self, output_dir: str, metadata: Optional[Dict] = None) -> None:
         """
-        Save the fine-tuned model with metadata for versioning and compliance.
+        Saves model weights, tokenizer, and a metadata JSON to output_dir.
+
+        The metadata file records the base model name, max_length, label mapping,
+        training history, and a save timestamp — enough to reproduce or audit
+        the checkpoint later.
 
         Args:
-            output_dir: Directory path to save model artifacts
-            metadata: Optional metadata (training config, performance metrics, etc.)
+            output_dir: Destination directory (created if it does not exist).
+            metadata: Any additional key-value pairs to merge into metadata.json.
         """
         if self.model is None or self.tokenizer is None:
-            raise RuntimeError("Model or tokenizer not initialized. Cannot save.")
+            raise RuntimeError("Nothing to save. Train or load a model first.")
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+        logger.info("Saving model to '%s'", output_path)
 
-        logging.info(f"Saving model to: {output_path}")
-
-        # Save model and tokenizer
         self.model.save_pretrained(output_path)
         self.tokenizer.save_pretrained(output_path)
 
-        # Save metadata for tracking
-        metadata_dict = {
-            "model_name": self.model_name,
+        meta = {
+            "base_model": self.model_name,
             "max_length": self.max_length,
             "emotion_labels": self.EMOTION_LABELS,
             "training_history": self.training_history,
-            "save_timestamp": datetime.now().isoformat(),
+            "saved_at": datetime.now().isoformat(),
             "device": str(self.device),
         }
-
         if metadata:
-            metadata_dict.update(metadata)
+            meta.update(metadata)
 
-        # Save metadata as JSON
-        import json
+        with open(output_path / "metadata.json", "w") as f:
+            json.dump(meta, f, indent=2)
 
-        metadata_path = output_path / "metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(metadata_dict, f, indent=2)
-
-        logging.info(f"Model and metadata saved successfully to {output_path}")
+        logger.info("Saved successfully.")
 
     def load_model(self, model_dir: str) -> None:
         """
-        Load a pre-trained model from disk.
+        Loads a saved checkpoint from disk.
 
         Args:
-            model_dir: Directory containing saved model artifacts
+            model_dir: Directory produced by save_model().
         """
         model_path = Path(model_dir)
-
         if not model_path.exists():
             raise FileNotFoundError(f"Model directory not found: {model_path}")
 
-        logging.info(f"Loading model from: {model_path}")
-
+        logger.info("Loading model from '%s'", model_path)
         try:
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
-            self.model.to(self.device)
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                model_path
+            ).to(self.device)
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-            logging.info("Model loaded successfully")
-        except Exception as e:
-            logging.error(f"Model loading failed: {e}")
-            raise RuntimeError(f"Cannot load model from {model_path}: {e}") from e
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load model from '{model_path}'") from exc
 
+        logger.info("Model loaded.")
+
+
+# ----------------------------------------------------------------------
+# Entry point
+# ----------------------------------------------------------------------
 
 def main():
-    """
-    Example training pipeline demonstrating complete workflow.
-    Adjust hyperparameters based on your computational resources.
-    """
-    logging.info("Starting Emotion Classifier Training Pipeline")
+    classifier = EmotionClassifier(model_name="distilbert-base-uncased", max_length=128)
 
-    # Initialize classifier
-    classifier = EmotionClassifier(
-        model_name="distilbert-base-uncased", max_length=128
-    )
-
-    # Prepare data
     train_loader, val_loader, test_loader = classifier.prepare_data(
-        dataset_name="dair-ai/emotion", batch_size=32
+        dataset_name="dair-ai/emotion",
+        batch_size=32,
     )
 
-    # Train model
-    history = classifier.train(
+    classifier.train(
         train_loader=train_loader,
         val_loader=val_loader,
         epochs=5,
@@ -676,31 +603,28 @@ def main():
         use_class_weights=True,
     )
 
-    # Evaluate on test set
     test_metrics = classifier.evaluate(test_loader, show_confusion_matrix=True)
 
-    # Save trained model
     classifier.save_model(
         output_dir="./models/emotion_classifier",
         metadata={"test_f1": test_metrics["f1_weighted"]},
     )
 
-    # Demo predictions
     print("\n" + "=" * 70)
     print("EXAMPLE PREDICTIONS")
     print("=" * 70)
 
-    test_texts = [
+    samples = [
         "I'm so happy today! Everything is going great!",
-        "I'm really worried about the exam tomorrow",
-        "This makes me so angry and frustrated",
-        "I miss you so much, thinking of you always",
+        "I'm really worried about the exam tomorrow.",
+        "This makes me so angry and frustrated.",
+        "I miss you so much, thinking of you always.",
     ]
 
-    for text in test_texts:
+    for text in samples:
         result = classifier.predict(text, return_confidence=True)
-        print(f"\nText: {text}")
-        print(f"Emotion: {result['emotion']} (confidence: {result['confidence']:.3f})")
+        print(f"\n  text:      {text}")
+        print(f"  emotion:   {result['emotion']}  ({result['confidence']:.1%})")
 
 
 if __name__ == "__main__":

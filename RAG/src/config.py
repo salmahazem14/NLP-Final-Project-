@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     top_k: int = 4
     final_llm:str = "llama-3.3-70b-versatile"
     hf_token: str = ""
-    lang_model_path: str = os.path.join(MODELS_DIR, "language_classifier_multi.pkl")
+    lang_model_path: str = os.path.join(MODELS_DIR, "language_classifier/language_classifier_multi.pkl")
     emotion_model_dir: str = os.path.join(MODELS_DIR, "emotion_classifier")
     
     class Config:

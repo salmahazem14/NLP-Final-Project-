@@ -19,6 +19,8 @@ RUN pip install --upgrade pip && \
 
 RUN mkdir -p /app/logs /app/data
 
+VOLUME ["/app/logs", "/app/data"]
+
 COPY . .
 
 RUN if [ ! -f /app/data/feedback.json ]; then echo "{}" > /app/data/feedback.json; fi

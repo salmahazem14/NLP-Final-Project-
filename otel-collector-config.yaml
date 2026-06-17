@@ -1,0 +1,33 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+
+exporters:
+  otlphttp/axiom:
+    endpoint: "https://api.axiom.co"
+    headers:
+      Authorization: "Bearer ${AXIOM_API_TOKEN}"
+      X-Axiom-Dataset: "${AXIOM_DATASET}"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/axiom]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/axiom]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/axiom]

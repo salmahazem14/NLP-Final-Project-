@@ -2,10 +2,8 @@
 title: Serenity Backend
 emoji: 🧠
 colorFrom: blue
-colorTo: purple
-sdk: streamlit
-sdk_version: "1.38.0"
-python_version: "3.11"
+colorTo: green
+sdk: docker
 pinned: false
 ---
 

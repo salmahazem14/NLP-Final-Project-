@@ -1,6 +1,7 @@
 import torch
 from pathlib import Path
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from RAG.src.config import settings
 
 class EmotionClassifier:
 
@@ -49,8 +50,7 @@ class EmotionClassifier:
 
 
 # ── load once at import time ──────────────────────────────────────────────────
-from src.config import settings
 _classifier = EmotionClassifier(settings.emotion_model_dir)
 
 def get_emotion_classifier() -> EmotionClassifier:
-    return _classifier
+    return _classifier 

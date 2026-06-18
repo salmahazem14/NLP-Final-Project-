@@ -1,10 +1,10 @@
 from langchain_core.runnables import RunnableSerializable
 from langchain_core.runnables.config import RunnableConfig
 from typing import Optional
-from src.language_detector import get_detector
+from RAG.src.language_detector import get_detector
 from langsmith import traceable
-from src.emotion_classifier import get_emotion_classifier
-from src.intent_classification import safe_classify_intent
+from RAG.src.emotion_classifier import get_emotion_classifier
+from RAG.src.intent_classification import safe_classify_intent
 
 
 class LanguageDetectorRunnable(RunnableSerializable):

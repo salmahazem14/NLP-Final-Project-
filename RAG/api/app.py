@@ -1,9 +1,7 @@
 from cmath import log
 
-from dotenv import load_dotenv
 
 from config.logging import get_logger, get_pipeline_logger, setup_logging
-load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,11 +16,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'modules'
 from RAG.src.feedback import record_feedback
 from RAG.src.chain import build_chain
 from RAG.src.history import delete_session_history
-from translation_pipeline.translation_pipeline import translate  # type: ignore
-from intent_classification.intent_classification import safe_classify_intent  # type: ignore
-from emotion_classifier.emotion_classifier import EmotionClassifier  # type: ignore
-from language_detection.language_detector import LanguageIdentifier  # type: ignore
-from src.config import settings
+from RAG.src.language_detector import get_detector
+from RAG.src.emotion_classifier import get_emotion_classifier
+from RAG.src.intent_classification import safe_classify_intent
+from modules.translation_pipeline.translation_pipeline import translate  # type: ignore
+
+from RAG.src.config import settings
 
 setup_logging(
     log_level=os.getenv("LOG_LEVEL", "INFO"),
@@ -48,12 +47,11 @@ chain = build_chain()
 
 # Initialize classifiers
 logger.info("Loading language identifier...", extra={"model_path": settings.lang_model_path})
-language_identifier = LanguageIdentifier()
-language_identifier.load_model(settings.lang_model_path)
+language_identifier = get_detector()
 
 logger.info("Loading emotion classifier...", extra={"model_dir": settings.emotion_model_dir})
-emotion_classifier = EmotionClassifier()
-emotion_classifier.load_model(settings.emotion_model_dir)
+emotion_classifier = get_emotion_classifier()
+
 
 logger.info("All models loaded. API ready.")
 
@@ -106,7 +104,7 @@ def chat(request: QueryRequest):
             log.debug("Translation complete")
 
         # Step 3: Detect emotion (on English text)
-        emotion = emotion_classifier.predict(english_text, return_confidence=False)
+        emotion = emotion_classifier.predict(english_text)["emotion"]
         log.info("Emotion classified", extra={"emotion": emotion})
 
         # Step 4: Classify intent (on English text)

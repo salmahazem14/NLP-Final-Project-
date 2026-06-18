@@ -17,7 +17,7 @@ class LanguageIdentifier:
 
 
 # ── load once at import time ──────────────────────────────────────────────────
-from src.config import settings
+from RAG.src.config import settings
 _detector = LanguageIdentifier(settings.lang_model_path)
 
 def get_detector() -> LanguageIdentifier:

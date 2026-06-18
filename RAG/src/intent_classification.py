@@ -1,8 +1,6 @@
-from dotenv import load_dotenv
 from groq import Groq
 import os
-load_dotenv()
-
+from RAG.src.config import settings
 VALID_LABELS = {
     "greeting",
     "goodbye",
@@ -12,7 +10,7 @@ VALID_LABELS = {
 }
 
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=settings.groq_api_key)
 
 def build_prompt(user_input):
     return f"""

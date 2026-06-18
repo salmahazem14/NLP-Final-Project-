@@ -1,6 +1,6 @@
 from langchain_core.runnables import ConfigurableField
-from src.vectorstore import get_vector_store
-from src.config import settings
+from RAG.src.vectorstore import get_vector_store
+from RAG.src.config import settings
 
 def get_retriever():
     vector_store = get_vector_store()

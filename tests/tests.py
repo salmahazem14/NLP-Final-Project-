@@ -61,7 +61,7 @@ def mock_all_models():
         
         mock_chain.invoke.return_value = "This is a helpful response."
         mock_lang.predict.return_value = "en"
-        mock_emotion.predict.return_value = "joy"
+        mock_emotion.predict.return_value = {"emotion": "joy", "confidence": 0.9}
         mock_intent.predict.return_value = "asking_mental_health_question"
       
         yield {
@@ -89,7 +89,7 @@ def lang_only_mock():
 def emotion_only_mock():
     """Mocks only the emotion classifier"""
     with patch("RAG.api.app.emotion_classifier") as mock_emotion:
-        mock_emotion.predict.return_value = "joy"
+        mock_emotion.predict.return_value = {"emotion": "joy", "confidence": 0.9}
         yield mock_emotion
 
 
@@ -174,7 +174,7 @@ class TestIntentRouting:
     def test_greeting_intent(self,client, session_id, lang_only_mock, chain_only_mock, emotion_only_mock):
         lang_only_mock.predict.return_value = "en"
         chain_only_mock.invoke.return_value = "Hello! How can I help you?"
-        emotion_only_mock.predict.return_value = "joy"
+        emotion_only_mock.predict.return_value ={"emotion": "joy", "confidence": 0.9}
         
         response = client.post("/chat", json={
             "question": "Hi there",
@@ -190,7 +190,7 @@ class TestIntentRouting:
     def test_goodbye_intent(self,client, session_id, lang_only_mock, chain_only_mock, emotion_only_mock):
         lang_only_mock.predict.return_value = "en"
         chain_only_mock.invoke.return_value = "Goodbye! Take care."
-        emotion_only_mock.predict.return_value = "sadness"
+        emotion_only_mock.predict.return_value ={"emotion": "sadness", "confidence": 0.8}
         response = client.post("/chat", json={
             "question": "Bye, see you later",
             "session_id": session_id,
@@ -205,7 +205,7 @@ class TestIntentRouting:
     def test_gratitude_intent(self,client, session_id, lang_only_mock, chain_only_mock, emotion_only_mock):
         lang_only_mock.predict.return_value = "en"
         chain_only_mock.invoke.return_value = "You're welcome!"
-        emotion_only_mock.predict.return_value = "joy"
+        emotion_only_mock.predict.return_value ={"emotion": "joy", "confidence": 0.9}
         response = client.post("/chat", json={
             "question": "Thank you so much",
             "session_id": session_id,
@@ -219,7 +219,7 @@ class TestIntentRouting:
 
     def test_mental_health_question_intent(self,client, session_id, lang_only_mock, chain_only_mock, emotion_only_mock):
         lang_only_mock.predict.return_value = "en"
-        emotion_only_mock.predict.return_value = "sadness"
+        emotion_only_mock.predict.return_value ={"emotion": "sadness", "confidence": 0.8}
 
         chain_only_mock.invoke.return_value = (
             "I am here to listen. Can you tell me more about how you feel?"
@@ -242,7 +242,7 @@ class TestIntentRouting:
         chain_only_mock.invoke.return_value = (
             "I can only help with mental health related questions."
         )
-        emotion_only_mock.predict.return_value = "neutral"
+        emotion_only_mock.predict.return_value ={"emotion": "neutral", "confidence": 0.8}
         response = client.post("/chat", json={
             "question": "What is the best football team?",
             "session_id": session_id,
@@ -261,7 +261,7 @@ class TestLanguageHandling:
         self, client, session_id, emotion_only_mock, intent_only_mock, chain_only_mock
     ):
         intent_only_mock.predict.return_value = "asking_mental_health_question"
-        emotion_only_mock.predict.return_value = "sadness"
+        emotion_only_mock.predict.return_value ={"emotion": "sadness", "confidence": 0.8}
         chain_only_mock.invoke.return_value = "Mock response."
 
         response = client.post("/chat", json={
@@ -279,7 +279,7 @@ class TestLanguageHandling:
         self, client, session_id, emotion_only_mock, intent_only_mock, chain_only_mock
     ):
         intent_only_mock.predict.return_value = "asking_mental_health_question"
-        emotion_only_mock.predict.return_value = "sadness"
+        emotion_only_mock.predict.return_value ={"emotion": "sadness", "confidence": 0.8}
         chain_only_mock.invoke.return_value = "لا تشعر بالحزن."
 
         response = client.post("/chat", json={
@@ -297,7 +297,7 @@ class TestLanguageHandling:
         self, client, session_id, emotion_only_mock, intent_only_mock, chain_only_mock
     ):
         intent_only_mock.predict.return_value = "asking_mental_health_question"
-        emotion_only_mock.predict.return_value = "sadness"
+        emotion_only_mock.predict.return_value ={"emotion": "sadness", "confidence": 0.8}
         chain_only_mock.invoke.return_value = (
         "Je comprends que vous vous sentez anxieux. "
         "Je suis là pour vous écouter et vous soutenir."
@@ -317,7 +317,7 @@ class TestLanguageHandling:
         self, client, session_id, emotion_only_mock, intent_only_mock, chain_only_mock
     ):
         intent_only_mock.predict.return_value = "asking_mental_health_question"
-        emotion_only_mock.predict.return_value = "sadness"
+        emotion_only_mock.predict.return_value ={"emotion": "sadness", "confidence": 0.8}
         chain_only_mock.invoke.return_value = (
         "Jag förstår att du känner dig ledsen och orolig. "
         "Jag finns här för att lyssna och stödja dig."

@@ -1,5 +1,5 @@
 from langchain_groq import ChatGroq
-from src.config import settings
+from RAG.src.config import settings
 
 def get_llm():
     return ChatGroq(

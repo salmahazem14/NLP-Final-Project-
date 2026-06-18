@@ -1,7 +1,7 @@
 from qdrant_client import QdrantClient
 from langchain_qdrant import QdrantVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
-from src.config import settings
+from RAG.src.config import settings
 import torch
 
 

@@ -1,10 +1,7 @@
-from dotenv import load_dotenv
 from groq import Groq
 import os
-
-load_dotenv()
-
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+from RAG.src.config import settings
+client = Groq(api_key=settings.groq_api_key)
 
 
 def translate(text, source_language, target_language):

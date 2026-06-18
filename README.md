@@ -108,17 +108,11 @@ cd RAG/api
 python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**5. Run Frontend:**
-```bash
-cd frontend
-python -m http.server 5000
-```
-
-**6. Open browser:**
+**5. Open browser:**
 - API: http://localhost:8000/health
 - API Docs: http://localhost:8000/docs
 
-**7. Run Tests:**
+**6. Run Tests:**
 ```bash
 python -m pytest tests/tests.py -v
 ```

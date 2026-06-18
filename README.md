@@ -63,6 +63,7 @@ User Response (In their original language)
 
 ### Prerequisites
 - Python 3.8+
+- Docker
 - Groq API Key (free: https://console.groq.com)
 - Qdrant Cloud account (free: https://cloud.qdrant.io)
 
@@ -78,7 +79,7 @@ pip install -r requirements.txt
 ```
 
 **2. Configure:**
-Create `.env` file:
+Create `.env` file in the project root:
 ```
 # LLM & Vector DB
 GROQ_API_KEY=your_groq_api_key
@@ -86,29 +87,42 @@ QDRANT_URL=your_qdrant_cloud_url
 QDRANT_API_KEY=your_qdrant_api_key
 
 # Optional: For advanced features
-HF_TOKEN=your_huggingface_token (for model downloads)
-LANGSMITH_API_KEY=your_langsmith_key (for debugging)
+HF_TOKEN=your_huggingface_token
+LANGSMITH_API_KEY=your_langsmith_key
 LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 LANGSMITH_PROJECT=mental-health-rag
 ```
 
-**3. Run Backend (Terminal 1):**
+**3. Run with Docker:**
+```bash
+docker run -it -p 8000:8000 --name mental-chat --env-file .env \
+  -v ${PWD}/logs:/app/logs \
+  -v ${PWD}/data:/app/data \
+  chatbot_image:v4
+```
+
+**4. Run Backend directly (without Docker):**
 ```bash
 cd RAG/api
 python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**4. Run Frontend (Terminal 2):**
+**5. Run Frontend:**
 ```bash
 cd frontend
 python -m http.server 5000
 ```
 
-**5. Open browser:**
+**6. Open browser:**
 - Frontend: http://localhost:5000
 - API: http://localhost:8000/health
-- Configure frontend settings to use `http://localhost:8000`
+- API Docs: http://localhost:8000/docs
+
+**7. Run Tests:**
+```bash
+python -m pytest tests/tests.py -v
+```
 
 ## API Documentation
 
@@ -161,40 +175,76 @@ Returns `{"status": "ok"}`
 
 ```
 NLP-Final-Project/
-├── main.py                    # Integrated pipeline (standalone demo)
-├── requirements.txt           # Dependencies
-├── .env                      # Environment config (create this)
-├── README.md                 # This file
+├── main.py                          # Integrated pipeline (standalone demo)
+├── requirements.txt                 # Dependencies
+├── Dockerfile                       # Docker build config
+├── docker-compose.yml               # Docker Compose config
+├── otel-collector-config.yaml       # OpenTelemetry collector config
+├── .env                             # Environment config (create this)
+├── README.md                        # This file
 │
-├── modules/                  # Standalone NLP components
-│   ├── language_detection/
-│   ├── emotion_classifier/
-│   ├── intent_classification/
+├── RAG/                             # RAG-based Q&A system
+│   ├── api/
+│   │   └── app.py                   # FastAPI backend (main entry point)
+│   └── src/
+│       ├── __init__.py
+│       ├── chain.py
+│       ├── config.py
+│       ├── emotion_classifier.py
+│       ├── feedback.py
+│       ├── history.py
+│       ├── intent_classification.py
+│       ├── language_detector.py
+│       ├── llm.py
+│       ├── prompt.py
+│       ├── retriever.py
+│       ├── runnables.py
+│       ├── utils.py
+│       ├── vectorstore.py
+│       └── .env.example
+│
+├── modules/                         # Standalone NLP components
 │   └── translation_pipeline/
+│       └── translation_pipeline.py
 │
-├── RAG/                      # RAG-based Q&A system
-│   ├── api/app.py           # FastAPI backend (main entry point)
-│   ├── src/                 # RAG implementation
-│   └── Notebooks/           # Training notebooks
+├── models/                          # Trained model files
+│   ├── emotion_classifier/
+│   └── language_classifier/
 │
-├── notebooks/                # Development notebooks
-│   └── intent_classification/
+├── config/                          # App configuration
+│   └── logging.py
 │
-└── frontend/                 # Web UI
-    ├── index.html
-    ├── app.js               # API integration
-    ├── style.css
-    └── README.md
+├── data/                            # Runtime data
+│   └── feedback.json
+│
+├── logs/                            # Application logs
+│   ├── app.log
+│   └── error.log
+│
+├── frontend/                        # Web UI
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── README.md
+│
+├── screenshots/                     # Documentation assets
+│   ├── caching screenshots/
+│   ├── tests screenshots/
+│   ├── volume screenshots/
+│   └── axiom-dashboard.png
+│
+└── tests/
+    └── tests.py
 ```
 
 ## Technologies
 
-- **Backend**: FastAPI, LangChain
+- **Backend**: FastAPI, LangChain, Uvicorn
 - **Models**: DistilBERT, Sentence Transformers
 - **APIs**: Groq, Qdrant
 - **Frontend**: HTML, CSS, JavaScript
+- **Infrastructure**: Docker, OpenTelemetry
 - **Databases**: Qdrant (vector)
-
 
 # Monitoring & Observability
 
@@ -227,7 +277,6 @@ NLP-Final-Project/
 **Why we chose it:** This single counter gives us both request throughput and error rate. By filtering to `5xx` responses versus total requests we get error rate without any extra instrumentation. Splitting by endpoint shows which routes are most used or most failing. It is the minimum viable server health signal and the first thing to check when something goes wrong in production.
 
 ---
-
 
 ## Axiom Dashboard
 

@@ -115,7 +115,6 @@ python -m http.server 5000
 ```
 
 **6. Open browser:**
-- Frontend: http://localhost:5000
 - API: http://localhost:8000/health
 - API Docs: http://localhost:8000/docs
 
@@ -170,6 +169,11 @@ Clears conversation history for a session.
 ### GET `/health` - Health check
 
 Returns `{"status": "ok"}`
+
+
+### POST `/feedback` - Submit feedback
+
+Adds user feedback for a response. The feedback can be either positive or negative, and the system saves the total count of each feedback type.
 
 ## Project Structure
 

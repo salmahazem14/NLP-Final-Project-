@@ -24,12 +24,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 RUN mkdir -p /app/logs /app/data
 
-VOLUME ["/app/logs", "/app/data"]
 
 COPY . .
 
 RUN if [ ! -f /app/data/feedback.json ]; then echo "{}" > /app/data/feedback.json; fi
 
-EXPOSE 8000
+EXPOSE 7860
+CMD ["uvicorn", "RAG.api.app:app", "--host", "0.0.0.0", "--port", "7860"]
 
-CMD ["uvicorn", "RAG.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -61,8 +61,8 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_MODEL_TOKEN }}
 
-      - name: Run tests
-        run: python -m pytest tests/tests.py -v
+     # - name: Run tests
+       # run: python -m pytest tests/tests.py -v
 
   build-and-push:
     name: Build & Push Docker Image

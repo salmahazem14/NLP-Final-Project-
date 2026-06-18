@@ -185,3 +185,51 @@ NLP-Final-Project/
 - **Databases**: Qdrant (vector)
 
 
+# Monitoring & Observability
+
+## Stack
+- **OpenTelemetry SDK** — instruments the FastAPI app and collects metrics
+- **OpenTelemetry Collector** — receives metrics from the app and forwards them to Axiom
+- **Axiom** — stores, queries, and visualizes all telemetry data
+
+---
+
+## Metrics
+
+### 1. NLP Metric — `nlp.intent_requests` (Counter)
+**What it tracks:** Number of requests per predicted intent label (e.g., `mental_health`, `greeting`), also tagged with detected emotion and language.
+
+**Why we chose it:** Intent distribution is the most direct signal of model health in an NLP pipeline. A sudden spike in unexpected intents means the classifier is confused or users are sending inputs outside the training distribution. Tracking intent over time also reveals usage patterns — for example, if most users are asking mental health questions, that validates the chatbot's core use case. We also tag emotion and language per request to get richer context without needing extra metrics.
+
+---
+
+### 2. Data Metric — `data.message_length` (Histogram)
+**What it tracks:** Distribution of character lengths of user messages.
+
+**Why we chose it:** Message length is a proxy for input quality and user behavior. Very short messages (under 5 characters) are likely noise or test traffic. Very long messages may cause latency spikes or hit token limits in the LLM. Tracking this as a histogram gives us percentile views (p50, p95, p99) to detect shifts in how users interact with the chatbot over time — without storing any raw message content, which protects user privacy.
+
+---
+
+### 3. Server Metric — `server.http_requests_total` (Counter)
+**What it tracks:** Total HTTP requests broken down by endpoint and HTTP status code (e.g., `200`, `500`), grouped by status class (`2xx`, `5xx`).
+
+**Why we chose it:** This single counter gives us both request throughput and error rate. By filtering to `5xx` responses versus total requests we get error rate without any extra instrumentation. Splitting by endpoint shows which routes are most used or most failing. It is the minimum viable server health signal and the first thing to check when something goes wrong in production.
+
+---
+
+
+## Axiom Dashboard
+
+The dashboard visualizes all 3 metrics in real time:
+
+| Chart | Metric | Type |
+|---|---|---|
+| Intent Distribution | `nlp.intent_requests` grouped by intent | Pie chart |
+| Emotion Distribution | `nlp.intent_requests` grouped by emotion | Pie chart |
+| Language Distribution | `nlp.intent_requests` grouped by language | Top list |
+| Total HTTP Requests | `server.http_requests_total` count | Statistic |
+| Request Status Distribution | `server.http_requests_total` grouped by status class | Pie chart |
+
+### Dashboard Screenshot
+
+![Axiom Dashboard](screenshots/axiom-dashboard.png)

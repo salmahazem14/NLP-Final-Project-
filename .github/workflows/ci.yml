@@ -51,6 +51,16 @@ jobs:
       - name: Install dependencies
         run: pip install --no-cache-dir -r requirements.txt
 
+      - name: Download models from Hugging Face
+        run: |
+          python -c "
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id='salmahazem1473/emotion_classifier', local_dir='models/emotion_classifier')
+          snapshot_download(repo_id='salmahazem1473/language_classifier', local_dir='models/language_classifier')
+          "
+        env:
+          HF_TOKEN: ${{ secrets.HF_MODEL_TOKEN }}
+
       - name: Run tests
         run: python -m pytest tests/tests.py -v
 

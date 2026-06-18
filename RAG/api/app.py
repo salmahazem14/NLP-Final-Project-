@@ -2,7 +2,8 @@ from cmath import log
 
 
 from config.logging import get_logger, get_pipeline_logger, setup_logging
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
@@ -23,6 +24,10 @@ from modules.translation_pipeline.translation_pipeline import translate  # type:
 
 from RAG.src.config import settings
 
+# ── Telemetry ─────────────────────────────────────────────────────────────────
+from .otel_metrics import record_intent, record_message_length, record_request
+# ─────────────────────────────────────────────────────────────────────────────
+
 setup_logging(
     log_level=os.getenv("LOG_LEVEL", "INFO"),
     json_logs=os.getenv("ENV", "development") == "production",
@@ -40,6 +45,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Middleware: record every request for server metric ────────────────────────
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    response = await call_next(request)
+    record_request(endpoint=request.url.path, status_code=response.status_code)
+    return response
+# ─────────────────────────────────────────────────────────────────────────────
 
 logger.info("Building RAG chain...")
 chain = build_chain()
@@ -91,7 +104,11 @@ def chat(request: QueryRequest):
         session_id = request.session_id or str(uuid.uuid4())
         log = get_pipeline_logger(logger, session_id=session_id)
         user_input = request.question
-        
+
+        # ── DATA metric: message length ───────────────────────────────────────
+        record_message_length(user_input)
+        # ─────────────────────────────────────────────────────────────────────
+
         # Step 1: Detect language
         detected_language = language_identifier.predict(user_input)
         log.info("Language detected", extra={"detected_language": detected_language})
@@ -110,6 +127,10 @@ def chat(request: QueryRequest):
         # Step 4: Classify intent (on English text)
         intent = safe_classify_intent(english_text)
         log.info("Intent classified", extra={"intent": intent})
+
+        # ── NLP metric: intent + emotion + language ───────────────────────────
+        record_intent(intent=intent, emotion=emotion, language=detected_language)
+        # ─────────────────────────────────────────────────────────────────────
 
         # Step 5: Get RAG response (always in English)
         rag_answer = chain.invoke(
@@ -143,7 +164,7 @@ def chat(request: QueryRequest):
     except Exception as e:
         logger.error(
             "Chat request failed",
-            exc_info=True,  
+            exc_info=True,
             extra={"error": str(e)},
         )
         print(f"Error: {e}")

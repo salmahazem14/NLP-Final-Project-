@@ -9,6 +9,8 @@ services:
       - ./logs:/app/logs
       - ./data:/app/data
     environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     env_file:
       - .env

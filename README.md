@@ -1,3 +1,14 @@
+---
+title: Serenity Backend
+emoji: 🧠
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+
 # Mental Health Support Chatbot
 
 A smart, end-to-end RAG-based chatbot that understands what you're feeling and helps with mental health questions. It auto-detects your language, recognizes your emotions, and gives you thoughtful answers in your own language.
